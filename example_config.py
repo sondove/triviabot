@@ -42,6 +42,8 @@ DEFAULT_NICK = 'triviabot'
 
 SERVER = 'irc.freenode.net'
 
+TEAM_LIMIT = 5
+
 # Some servers support SSL, and some do not. If you have trouble connecting
 # to your IRC network, you may have to disable SSL or change the server port
 SERVER_PORT = 6667

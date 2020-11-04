@@ -66,15 +66,18 @@ class triviabot(irc.IRCClient):
         self._answer = Answer()
         self._question = ''
         self._scores = {}
+        self._teams = {}
         self._clue_number = 0
         self._admins = list(config.ADMINS)
         self._admins.append(config.OWNER)
         self._game_channel = config.GAME_CHANNEL
+        self._team_limit = config.TEAM_LIMIT
         self._current_points = 5
         self._questions_dir = config.Q_DIR
         self._lc = LoopingCall(self._play_game)
         self._quit = False
         self._restarting = False
+
         self._load_game()
         self._votes = 0
         self._voters = []
@@ -150,7 +153,7 @@ class triviabot(irc.IRCClient):
         else:
             self._gmsg("Welcome to {}!".format(self._game_channel))
             self._gmsg("Have an admin start the game when you are ready.")
-            self._gmsg("For how to use this bot, just say ?help or")
+            self._gmsg("For how to use this bot, just say !help or")
             self._gmsg("{} help.".format(self.nickname))
 
     def joined(self, channel):
@@ -172,9 +175,9 @@ class triviabot(irc.IRCClient):
 
         # parses each incoming line, and sees if it's a command for the bot.
         try:
-            if (msg[0] == "?"):
-                command = msg.replace('?', '').split()[0]
-                args = msg.replace('?', '').split()[1:]
+            if (msg[0] == "!"):
+                command = msg.replace('!', '').split()[0]
+                args = msg.replace('!', '').split()[1:]
                 self.select_command(command, args, user, channel)
                 return
             elif (msg.split()[0].find(self.nickname) == 0):
@@ -224,6 +227,128 @@ class triviabot(irc.IRCClient):
         print("CTCP recieved: " + user + ":" + channel +
               ": " + msg[0][0] + " " + msg[0][1])
 
+    def _leave_util(self, channel, team, user):
+      """
+      """
+      dst = user
+      if not channel == self.nickname:
+        dst = channel
+
+      ot = team
+      self._teams['teams'][ot]['members'] = [x for x in self._teams['teams'][ot]['members'] if x != user]
+      if len(self._teams['teams'][ot]['members']) == 0:
+        del self._teams['teams'][ot]
+        self._cmsg(dst, '{} left "{}".'.format(user, ot))
+      else:
+        if self._teams['teams'][ot]['owner'] == user:
+          no = self._teams['teams'][ot]['members'][0]
+          self._teams['teams'][ot]['owner'] = no
+          self._cmsg(dst, '{} left "{}", {} is the new owner.'.format(user, ot, no))
+        else:
+          self._cmsg(dst, '{} left "{}".'.format(user, ot))
+
+      self._save_game()
+
+    def _leave(self, args, user, channel):
+      """
+      leave your current team
+      """
+      self._leave_util(channel, self._teams['users'][user], user)
+
+    def _kick(self, args, user, channel):
+      """
+      Kick's a user from your team if you are an admin
+      """
+
+      ku = args[0]
+
+      dst = user
+      if not channel == self.nickname:
+        dst = channel
+
+      t = self._teams['users'][user]
+      if self._teams['teams'][t]['owner'] == user:
+        if ku in self._teams['teams'][t]['members']:
+          self._leave_util(channel, t, ku)
+        else:
+          self._cmsg(dst, '{}: {} is not in your team!'.format(user, ku))
+      else:
+        self._cmsg(dst, '{}: you are not the owner of "{}"!'.format(user, t))
+
+    def _join(self, args, user, channel):
+        '''
+        User want's to join a team
+        '''
+        dst = user
+        if not channel == self.nickname:
+          dst = channel
+
+        print('\n\n\n')
+        print('---')
+        print(self._teams)
+
+        tn = ' '.join(args)
+        tn = [ch for ch in tn if ch.isalnum() or ch == ' ']
+        tn = ''.join(tn)
+        tn = tn[:25]
+
+        print(tn)
+
+
+        if 'users' not in self._teams:
+          self._teams['users'] = {}
+
+        if 'teams' not in self._teams:
+          self._teams['teams'] = {}
+
+        if tn not in self._teams['teams'].keys():
+          o = {}
+          o['owner'] = user
+          o['name'] = tn
+          o['members'] = []
+
+          self._teams['teams'][tn] = o
+
+        else:
+          if user in self._teams['teams'][tn]['members']:
+            self._cmsg(dst, '{}: you are already in "{}".'.format(user, tn))
+            return
+
+          if len(self._teams['teams'][tn]['members']) >= self._team_limit:
+            self._cmsg(dst, '{}: Team "{}" is full, someone needs to leave before you can join.'.format(user, tn))
+            return
+
+        # if user is in a team, leave it
+        if user in self._teams['users'].keys():
+
+          ot = self._teams['users'][user]
+          if ot in self._teams['teams'].keys():
+            self._leave_util(channel, ot, user)
+
+        self._teams['teams'][tn]['members'].append(user)
+        self._teams['users'][user] = tn
+
+        self._cmsg(dst, '{} has joined "{}".'.format(user, tn))
+
+        print(self._teams)
+
+        self._save_game()
+
+    def _list_teams(self, args, user, channel):
+      """
+      List all teams? Capped at 25?
+      """
+
+      dst = user
+      if not channel == self.nickname:
+        dst = channel
+
+      for t in self._teams['teams'].keys():
+        self._cmsg(dst, '{}: {}'.format(t, ', '.join(self._teams['teams'][t]['members'])))
+
+
+
+
     def _help(self, args, user, channel):
         '''
         Tells people how to use the bot.
@@ -231,17 +356,21 @@ class triviabot(irc.IRCClient):
         Only responds to the user since there could be a game in
         progress.
         '''
+        dst = user
+        if not channel == self.nickname:
+          dst = channel
+
         try:
             self._admins.index(user)
         except:
-            self._cmsg(user, "I'm {}'s trivia bot.".format(config.OWNER))
-            self._cmsg(user, "Commands: score, standings, giveclue, help, "
-                       "next, source")
+            self._cmsg(dst, "I'm {}'s trivia bot.".format(config.OWNER))
+            self._cmsg(dst, "Commands: score, standings, help, join, leave")
+
             return
-        self._cmsg(user, "I'm {}'s trivia bot.".format(config.OWNER))
-        self._cmsg(user, "Commands: score, standings, giveclue, help, next, "
-                   "skip, source")
-        self._cmsg(user, "Admin commands: die, set <user> <score>, start, stop, "
+        self._cmsg(dst, "I'm {}'s trivia bot.".format(config.OWNER))
+        self._cmsg(dst, "Commands: score, standings, giveclue, help, next, "
+                   "skip ")
+        self._cmsg(dst, "Admin commands: die, set <user> <score>, start, stop, "
                    "save")
 
     def _show_source(self, args, user, channel):
@@ -263,11 +392,15 @@ class triviabot(irc.IRCClient):
         # set up command dicts.
         unpriviledged_commands = {'score': self._score,
                                   'help': self._help,
-                                  'source': self._show_source,
+                                  #'source': self._show_source,
                                   'standings': self._standings,
-                                  'giveclue': self._give_clue,
-                                  'next': self._next_vote,
-                                  'skip': self._next_question
+                                  'join': self._join,
+                                  'leave': self._leave,
+                                  'kick': self._kick,
+                                  'teams': self._list_teams,
+                                  #'giveclue': self._give_clue,
+                                  #'next': self._next_vote,
+                                  #'skip': self._next_question
                                   }
         priviledged_commands = {'die': self._die,
                                 'restart': self._restart,
@@ -359,6 +492,10 @@ class triviabot(irc.IRCClient):
             json.dump(self._scores, savefile)
             print("Scores have been saved.")
 
+        with open(os.path.join(config.SAVE_DIR, 'teams.json'), 'w') as savefile:
+            json.dump(self._teams, savefile)
+            print("Teams have been saved.")
+
     def _load_game(self):
         '''
         Loads the running data from previous games.
@@ -378,6 +515,24 @@ class triviabot(irc.IRCClient):
             self._scores[str(name)] = int(temp_dict[name])
         print(self._scores)
         print("Scores loaded.")
+
+        # ensure initialization
+        self._teams = {}
+        if not path.exists(config.SAVE_DIR):
+            print("Save directory doesn't exist.")
+            return
+        try:
+            with open(os.path.join(config.SAVE_DIR, 'teams.json'), 'r') as savefile:
+                temp_dict = json.load(savefile)
+        except:
+            print("Team file doesn't exist.")
+            return
+
+        self._teams = temp_dict
+        print(self._scores)
+        print("Teams loaded.")
+
+
 
     def _set_user_score(self, args, user, channel):
         '''
