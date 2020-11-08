@@ -67,6 +67,12 @@ class triviabot(irc.IRCClient):
         self._question = ''
         self._scores = {}
         self._teams = {}
+
+        self._round_questions = config.ROUND_QUESTIONS
+        self._round_scores = {}
+        self._round_started = False
+        self._round_question_num = 0
+
         self._clue_number = 0
         self._admins = list(config.ADMINS)
         self._admins.append(config.OWNER)
@@ -110,26 +116,37 @@ class triviabot(irc.IRCClient):
         '''
         Implements the main loop of the game.
         '''
+        qn = self._round_question_num
+        if qn > config.ROUND_QUESTIONS:
+          self._gmsg("Round complete!")
+          self._stop()
+
         points = {0: 5,
                   1: 3,
                   2: 2,
                   3: 1
                   }
         if self._clue_number == 0:
+            #self._lc.stop()
+            #self._lc.start(config.WAIT_INTERVAL)
+
+            self._round_question_num += 1
+            qn = self._round_question_num
             self._votes = 0
             self._voters = []
             self._get_new_question()
             self._current_points = points[self._clue_number]
             # Blank line.
             self._gmsg("")
-            self._gmsg("Next question:")
+            #self._gmsg("Next question:")
+            self._gmsg("Next Question [{}/{}]:".format(qn, self._round_questions))
             self._gmsg(self._question)
             self._gmsg("Clue: {}".format(self._answer.current_clue()))
             self._clue_number += 1
         # we must be somewhere in between
         elif self._clue_number < 4:
             self._current_points = points[self._clue_number]
-            self._gmsg("Question:")
+            self._gmsg("Question [{}/{}]:".format(qn, self._round_questions))
             self._gmsg(self._question)
             self._gmsg("Clue: {}".format(self._answer.give_clue()))
             self._clue_number += 1
@@ -138,8 +155,18 @@ class triviabot(irc.IRCClient):
             self._gmsg("No one got it. The answer was: {}"
                        .format(self._answer.answer))
             self._clue_number = 0
-            self._get_new_question()
-            # self._lc.reset()
+
+            qn = self._round_question_num
+            if qn >= config.ROUND_QUESTIONS:
+              self._gmsg("Round complete!")
+              self._stop()
+            else:
+              self._gmsg("Next question in {} seconds.".format(config.WAIT_QUESTION))
+              self._get_new_question()
+
+            #self._lc.reset()
+            #self._lc.stop()
+            #self._lc.start(config.WAIT_QUESTION, False)
 
     def signedOn(self):
         '''
@@ -188,6 +215,8 @@ class triviabot(irc.IRCClient):
             # if not, try to match the message to the answer.
             else:
                 if msg.lower().strip() == self._answer.answer.lower():
+                #if msg.lower().strip() == self._answer.answer.lower() or \
+                #  msg.lower().strip() == 'wtf':
                     self._winner(user, channel)
                     self._save_game()
         except Exception as e:
@@ -203,21 +232,50 @@ class triviabot(irc.IRCClient):
             self.msg(channel,
                      "I'm sorry, answers must be given in the game channel.")
             return
-        self._gmsg("{} GOT IT!".format(user.upper()))
-        self._gmsg("""If there was any doubt, the correct answer was: {}""".format(self._answer.answer))
+
+        # get team
+        in_team = True
+        tn = 'noteam'
         try:
-            self._scores[user] += self._current_points
+          tn = self._teams['users'][user]
         except:
-            self._scores[user] = self._current_points
+          in_team = False
+
+        if in_team:
+          self._gmsg("{} ({}) GOT IT!".format(tn.upper(), user.upper()))
+        else:
+          self._gmsg("{} GOT IT!".format(user.upper()))
+
+        self._gmsg("""If there was any doubt, the correct answer was: {}""".format(self._answer.answer))
+
+
+        try:
+            self._scores['user'][user] += self._current_points
+            if in_team:
+              self._scores['team'][tn] += self._current_points
+        except:
+            self._scores['user'][user] = self._current_points
+            if in_team:
+              self._scores['team'][tn] = self._current_points
         if self._current_points == 1:
             self._gmsg("{} point has been added to your score!"
                        .format(str(self._current_points)))
         else:
             self._gmsg("{} points have been added to your score!"
                        .format(str(self._current_points)))
-        self._clue_number = 0
+
         self._lc.stop()
-        self._lc.start(config.WAIT_INTERVAL)
+        #self._lc.start(config.WAIT_QUESTION, False)
+        self._lc.start(config.WAIT_INTERVAL, False)
+
+        self._clue_number = 0
+
+        qn = self._round_question_num
+        if qn >= config.ROUND_QUESTIONS:
+          self._gmsg("Round complete!")
+          self._stop()
+        else:
+          self._gmsg("Next question in {} seconds.".format(config.WAIT_QUESTION))
 
     def ctcpQuery(self, user, channel, msg):
         '''
@@ -465,6 +523,7 @@ class triviabot(irc.IRCClient):
         if self._lc.running:
             return
         else:
+            self._gmsg("Starting a new round!")
             self._lc.start(config.WAIT_INTERVAL)
             self.factory.running = True
 
@@ -477,8 +536,9 @@ class triviabot(irc.IRCClient):
             return
         else:
             self._lc.stop()
-            self._gmsg('Thanks for playing trivia!')
-            self._gmsg('Current rankings were:')
+            self._round_question_num = 0
+            self._gmsg('Thanks for playing!')
+            #self._gmsg('Current rankings were:')
             self._standings(None, self._game_channel, None)
             self._gmsg('''Scores have been saved, and see you next game!''')
             self._save_game()
@@ -507,12 +567,16 @@ class triviabot(irc.IRCClient):
             return
         try:
             with open(os.path.join(config.SAVE_DIR, 'scores.json'), 'r') as savefile:
-                temp_dict = json.load(savefile)
+                self._scores = json.load(savefile)
         except:
             print("Save file doesn't exist.")
             return
-        for name in temp_dict.keys():
-            self._scores[str(name)] = int(temp_dict[name])
+
+        if 'user' not in self._scores:
+          self._scores['user'] = {}
+        if 'team' not in self._scores:
+          self._scores['team'] = {}
+
         print(self._scores)
         print("Scores loaded.")
 
@@ -602,7 +666,7 @@ class triviabot(irc.IRCClient):
         TODO: order them.
         '''
         self._cmsg(user, "The current trivia standings are: ")
-        sorted_scores = sorted(self._scores.iteritems(), key=lambda (k, v): (v, k), reverse=True)
+        sorted_scores = sorted(self._scores['team'].iteritems(), key=lambda (k, v): (v, k), reverse=True)
         for rank, (player, score) in enumerate(sorted_scores, start=1):
             formatted_score = "{}: {}: {}".format(rank, player, score)
             self._cmsg(user, formatted_score)
@@ -611,7 +675,9 @@ class triviabot(irc.IRCClient):
         if not self._lc.running:
             self._gmsg("we are not playing right now.")
             return
-        self._cmsg(channel, "Question: ")
+        qn = self._round_question_num
+        self._round_question_num += 1
+        self._cmsg(channel, "Question [{}/{}]: ".format(qn, self.round_questions))
         self._cmsg(channel, self._question)
         self._cmsg(channel, "Clue: " + self._answer.current_clue())
 

@@ -26,6 +26,7 @@ IDENT_STRING = 'password'
 # Time (in seconds) between clues, and the wait time between questions.
 # If ?skip is used, the interval doesn't apply
 WAIT_INTERVAL = 30
+WAIT_QUESTION = 5
 
 # Colorize the text so it contrasts with the channel text.
 # This makes it easier to play the game when people are chatting.
@@ -43,6 +44,8 @@ DEFAULT_NICK = 'triviabot'
 SERVER = 'irc.freenode.net'
 
 TEAM_LIMIT = 5
+
+ROUND_QUESTIONS = 3
 
 # Some servers support SSL, and some do not. If you have trouble connecting
 # to your IRC network, you may have to disable SSL or change the server port
