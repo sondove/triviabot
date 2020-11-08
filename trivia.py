@@ -26,6 +26,7 @@ import json
 import string
 import os
 import sys
+import datetime
 from os import execl, listdir, path, makedirs
 from random import choice
 from twisted.words.protocols import irc
@@ -462,6 +463,7 @@ class triviabot(irc.IRCClient):
                                   }
         priviledged_commands = {'die': self._die,
                                 'restart': self._restart,
+                                'reset': self._reset,
                                 'set': self._set_user_score,
                                 'start': self._start,
                                 'stop': self._stop,
@@ -539,10 +541,18 @@ class triviabot(irc.IRCClient):
             self._round_question_num = 0
             self._gmsg('Thanks for playing!')
             #self._gmsg('Current rankings were:')
-            self._standings(None, self._game_channel, None)
+            self._standings(None, self._game_channel, self._game_channel)
             self._gmsg('''Scores have been saved, and see you next game!''')
             self._save_game()
             self.factory.running = False
+
+
+            # we should reset all scores so it's clean for the next one
+            # create a date
+
+
+
+
 
     def _save_game(self, *args):
         '''
@@ -659,17 +669,33 @@ class triviabot(irc.IRCClient):
         self._lc.stop()
         self._lc.start(config.WAIT_INTERVAL)
 
+    def _reset(self, args, user, channel):
+
+        fn = "scores-{:%Y-%m-%d-%H:%M:%S}.json".format(datetime.datetime.now())
+        with open(os.path.join(config.SAVE_DIR, fn), 'w') as savefile:
+            json.dump(self._scores, savefile)
+            self._scores = {}
+            self._scores['user'] = {}
+            self._scores['team'] = {}
+            print("Scores have been reset.")
+
+
     def _standings(self, args, user, channel):
         '''
         Tells the user the complete standings in the game.
 
         TODO: order them.
         '''
+
+        dst = user
+        if not channel == self.nickname:
+          dst = channel
+
         self._cmsg(user, "The current trivia standings are: ")
         sorted_scores = sorted(self._scores['team'].iteritems(), key=lambda (k, v): (v, k), reverse=True)
         for rank, (player, score) in enumerate(sorted_scores, start=1):
             formatted_score = "{}: {}: {}".format(rank, player, score)
-            self._cmsg(user, formatted_score)
+            self._cmsg(dst, formatted_score)
 
     def _give_clue(self, args, user, channel):
         if not self._lc.running:
