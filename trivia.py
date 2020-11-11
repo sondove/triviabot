@@ -471,6 +471,7 @@ class triviabot(irc.IRCClient):
                                 'restart': self._restart,
                                 'reset': self._reset,
                                 'set': self._set_user_score,
+                                'qnum': self._set_question_number,
                                 'start': self._start,
                                 'stop': self._stop,
                                 'save': self._save_game,
@@ -616,6 +617,24 @@ class triviabot(irc.IRCClient):
         print("Teams loaded.")
 
 
+    def _set_question_number(self, args, user, channel):
+        '''
+        Administrative action taken to adjust round question count
+        '''
+        if self._lc.running:
+          self._cmsg(user, "Can't change question number in the middle of a round")
+          return
+
+        if not len(args):
+          self._cmsg(user, "Round questions is currently set to: {}".format(self._round_questions))
+          return
+
+        try:
+            self._round_questions = int(args[0])
+        except:
+            self._cmsg(user, args[0] + " is not a valid question number.")
+            return
+        self._cmsg(user, "Round questions set to: " + args[0])
 
     def _set_user_score(self, args, user, channel):
         '''
