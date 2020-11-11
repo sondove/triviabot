@@ -144,6 +144,8 @@ class triviabot(irc.IRCClient):
             self._gmsg(self._question)
             self._gmsg("Clue: {}".format(self._answer.current_clue()))
             self._clue_number += 1
+            # let people speak ; -)
+            self.mode(self._game_channel, False, 'm')
         # we must be somewhere in between
         elif self._clue_number < 4:
             self._current_points = points[self._clue_number]
@@ -153,6 +155,7 @@ class triviabot(irc.IRCClient):
             self._clue_number += 1
         # no one must have gotten it.
         else:
+            self.mode(self._game_channel, True, 'm')
             self._gmsg("No one got it. The answer was: {}"
                        .format(self._answer.answer))
             self._clue_number = 0
@@ -233,6 +236,9 @@ class triviabot(irc.IRCClient):
             self.msg(channel,
                      "I'm sorry, answers must be given in the game channel.")
             return
+
+        # mute the channel when announcing score
+        self.mode(self._game_channel, True, 'm')
 
         # get team
         in_team = True
@@ -546,6 +552,9 @@ class triviabot(irc.IRCClient):
             self._save_game()
             self.factory.running = False
 
+            # people should be able to talk
+            self.mode(self._game_channel, False, 'm')
+
 
             # we should reset all scores so it's clean for the next one
             # create a date
@@ -691,7 +700,7 @@ class triviabot(irc.IRCClient):
         if not channel == self.nickname:
           dst = channel
 
-        self._cmsg(user, "The current trivia standings are: ")
+        self._cmsg(dst, "The current trivia standings are: ")
         sorted_scores = sorted(self._scores['team'].iteritems(), key=lambda (k, v): (v, k), reverse=True)
         for rank, (player, score) in enumerate(sorted_scores, start=1):
             formatted_score = "{}: {}: {}".format(rank, player, score)
